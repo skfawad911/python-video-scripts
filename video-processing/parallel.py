@@ -1,7 +1,7 @@
 #####################################################################################
 ##
 ## Author: Fawad
-## Date: 28-07-2024
+## Date: 30-07-2024
 ## Work: Works same as video.py added a parallel processing feature 
 ## Usage: python3 parallel.py <overlay-video-path> <output-video-path> <'Text'>
 ##
