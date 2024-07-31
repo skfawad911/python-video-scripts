@@ -2,7 +2,7 @@
 ##
 ## Author: Fawad
 ## Date: 28-07-2024
-## Work: Overlay a video on top of another video with text below it 
+## Work: Works same as video.py added a parallel processing feature 
 ## Usage: python3 parallel.py <overlay-video-path> <output-video-path> <'Text'>
 ##
 ####################################################################################
