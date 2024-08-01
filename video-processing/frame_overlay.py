@@ -2,7 +2,7 @@
 ##
 ## Author: Fawad
 ## Date: 30-07-2024
-## Work: Works same as video.py added a parallel processing feature 
+## Work: Works same as video.py just creates a frame to overlay video
 ## Usage: python3 frame_overlay.py <overlay-video-path> <output-video-path> <'Text'>
 ##
 ####################################################################################
