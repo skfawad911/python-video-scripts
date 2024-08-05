@@ -1,0 +1,203 @@
+#########################################################################################################################################################################################
+##
+## Author: Fawad
+## Date: 28-07-2024
+## Work: Same as teacher_day_1.0 just made code more organized and efficient
+## Usage: python3 ${pythonScriptPath} --yellow_image ${yellowImagePath} --green_image ${greenImagePath} --final_video ${outputPath} --text1 "${textFrom}" --text2 "${textTo}
+##
+########################################################################################################################################################################################
+
+
+import cv2
+import os
+import numpy as np
+import shutil
+from PIL import ImageFont, ImageDraw, Image
+import moviepy.editor as mp
+import uuid
+import argparse
+
+def process_video(yellow_image_path, green_image_path, final_video_path, text1, text2):
+    # Paths
+    request_id = str(uuid.uuid4())  # Generate a unique ID for the request
+    base_path = '/home/digi/teacher_day'
+    video_path = '/home/digi/teacher_day/default_videos/output.mp4'
+    frames_folder = '/home/digi/teacher_day/frames'
+    processed_frames_folder = os.path.join(base_path, request_id, 'processed_frames')
+    output_video_path = os.path.join(base_path, request_id, 'modified_video.mp4')
+    font_path = '/home/digi/teacher_day/Fonts/georgia-2-cufonfonts/georgiai.ttf'
+    audio_path = os.path.join(base_path, request_id, 'audio_extracted.mp3')
+    
+    frame_count = 2711
+    frame_rate = 60
+
+    # Text properties
+    text_properties = [
+        {
+            'text': text1,
+            'font_size': 80,
+            'font_color': (0, 0, 0),  # Black color
+            'position': (920, 465),
+            'frames': list(range(325, 484))
+        },
+        {
+            'text': text1,
+            'font_size': 80,
+            'font_color': (0, 0, 0),  # Black color
+            'position': (270, 440),
+            'frames': list(range(1936, 2134))
+        },
+        {
+            'text': text2,
+            'font_size': 50,
+            'font_color': (0, 0, 0),  # Black color
+            'position': (400, 655),
+            'frames': list(range(2550, 2710))
+        }
+    ]
+
+    if os.path.exists(processed_frames_folder):
+        shutil.rmtree(processed_frames_folder)
+    os.makedirs(processed_frames_folder, exist_ok=True)
+
+    # Define functions for detecting and replacing colored frames
+    def detect_colored_frame(frame, lower_color, upper_color):
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, lower_color, upper_color)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            largest_contour = max(contours, key=cv2.contourArea)
+            return largest_contour, mask
+        return None, mask
+
+    def create_circular_mask(image, contour, expansion=25):
+        mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        cv2.drawContours(mask, [contour], -1, (255), thickness=cv2.FILLED)
+        if expansion > 0:
+            mask = cv2.dilate(mask, np.ones((expansion, expansion), np.uint8), iterations=1)
+        mask = cv2.GaussianBlur(mask, (15, 15), 0)
+        return mask
+
+    def add_white_border(image, border_size):
+        bordered_image = cv2.copyMakeBorder(
+            image, 
+            border_size, border_size, border_size, border_size, 
+            cv2.BORDER_CONSTANT, 
+            value=[255, 255, 255]
+        )
+        return bordered_image
+
+    def replace_colored_frame(frame, frame_contour, replacement_image):
+        x, y, w, h = cv2.boundingRect(frame_contour)
+        border_size = 0  # You can adjust this value
+        replacement_image_with_border = add_white_border(replacement_image, border_size)
+        replacement_image_resized = cv2.resize(replacement_image_with_border, (w, h))
+        mask = create_circular_mask(frame, frame_contour)
+        mask_inv = cv2.bitwise_not(mask)
+        roi = frame[y:y+h, x:x+w]
+        frame_bg = cv2.bitwise_and(roi, roi, mask=mask_inv[y:y+h, x:x+w])
+        replacement_fg = cv2.bitwise_and(replacement_image_resized, replacement_image_resized, mask=mask[y:y+h, x:x+w])
+        dst = cv2.add(frame_bg, replacement_fg)
+        frame[y:y+h, x:x+w] = dst
+        return frame
+
+    # Load replacement images
+    yellow_replacement_image = cv2.imread(yellow_image_path)
+    green_replacement_image = cv2.imread(green_image_path)
+
+    if yellow_replacement_image is None or green_replacement_image is None:
+        print("One or both replacement images not found.")
+        return
+
+    # Define color ranges in HSV
+    lower_yellow = np.array([25, 150, 150])
+    upper_yellow = np.array([35, 255, 255])
+    lower_green = np.array([45, 100, 50])
+    upper_green = np.array([75, 255, 255])
+
+    print("Processing frames...")
+    # Process each frame
+    for frame_index in range(frame_count):
+        frame_path = os.path.join(frames_folder, f'frame_{frame_index:04d}.png')
+        frame = cv2.imread(frame_path)
+        if frame is not None:
+            # Detect yellow contours
+            yellow_contour, yellow_mask = detect_colored_frame(frame, lower_yellow, upper_yellow)
+            # Detect green contours
+            green_contour, green_mask = detect_colored_frame(frame, lower_green, upper_green)
+            # Replace detected contours with respective images
+            if yellow_contour is not None:
+                frame = replace_colored_frame(frame, yellow_contour, yellow_replacement_image)
+            if green_contour is not None:
+                frame = replace_colored_frame(frame, green_contour, green_replacement_image)
+            # Add text to frames
+            for text_prop in text_properties:
+                if frame_index in text_prop['frames']:
+                    font = ImageFont.truetype(font_path, text_prop['font_size'])
+                    frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                    draw = ImageDraw.Draw(frame_pil)
+                    draw.text(text_prop['position'], text_prop['text'], font=font, fill=text_prop['font_color'])
+                    frame = cv2.cvtColor(np.array(frame_pil), cv2.COLOR_RGB2BGR)
+            processed_frame_path = os.path.join(processed_frames_folder, f'frame_{frame_index:04d}.png')
+            cv2.imwrite(processed_frame_path, frame)
+        else:
+            print(f"Frame {frame_path} not found.")
+
+    print("Recompiling video from processed frames...")
+    # Recompile video from processed frames
+    first_frame_path = os.path.join(processed_frames_folder, 'frame_0000.png')
+    first_frame = cv2.imread(first_frame_path)
+    if first_frame is None:
+        print("First processed frame not found.")
+        return
+
+    frame_height, frame_width, _ = first_frame.shape
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_video_path, fourcc, frame_rate, (frame_width, frame_height))
+
+    for frame_index in range(frame_count):
+        frame_path = os.path.join(processed_frames_folder, f'frame_{frame_index:04d}.png')
+        frame = cv2.imread(frame_path)
+        if frame is not None:
+            out.write(frame)
+        else:
+            print(f"Processed frame {frame_path} not found.")
+
+    out.release()
+    print(f"Modified video saved to {output_video_path}")
+
+    print("Extracting audio from original video...")
+    # Extract audio from original video
+    video_clip = mp.VideoFileClip(video_path)
+    audio_clip = video_clip.audio
+    audio_clip.write_audiofile(audio_path)
+
+    print("Combining modified video with extracted audio...")
+    # Combine modified video with extracted audio
+    modified_video_clip = mp.VideoFileClip(output_video_path)
+    modified_video_with_audio = modified_video_clip.set_audio(mp.AudioFileClip(audio_path))
+    modified_video_with_audio.write_videofile(final_video_path, codec='libx264', audio_codec='aac')
+
+    print(f"Final video with audio saved to {final_video_path}")
+
+    # Cleanup
+    print("Cleaning up intermediate files...")
+    os.remove(output_video_path)
+    shutil.rmtree(processed_frames_folder)
+    shutil.rmtree(os.path.join(base_path, request_id))
+
+    print("Cleanup completed.")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Process video by replacing specific colored frames and adding text.")
+    parser.add_argument("--yellow_image", type=str, required=True, help="Path to the yellow replacement image.")
+    parser.add_argument("--green_image", type=str, required=True, help="Path to the green replacement image.")
+    parser.add_argument("--final_video", type=str, required=True, help="Path to save the final processed video.")
+    parser.add_argument("--text1", type=str, required=True, help="First text to add to the video.")
+    parser.add_argument("--text2", type=str, required=True, help="Second text to add to the video.")
+    
+    args = parser.parse_args()
+    
+    process_video(args.yellow_image, args.green_image, args.final_video, args.text1, args.text2)
