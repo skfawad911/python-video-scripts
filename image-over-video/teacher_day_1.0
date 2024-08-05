@@ -1,0 +1,194 @@
+#####################################################################################
+##
+## Author: Fawad
+## Date: 05-08-2024
+## Work: Replaces green and yellow image with our specified images and also add texts 
+## Usage: python3 teacher_day_1.0
+##
+####################################################################################
+
+
+import cv2
+import os
+import numpy as np
+import shutil
+from PIL import ImageFont, ImageDraw, Image
+import moviepy.editor as mp
+
+# Paths
+video_path = '/home/digi/teacher_day/default_videos/output.mp4'
+output_folder = '/home/digi/teacher_day/frames'
+yellow_image_path = '/home/digi/teacher_day/images/gen.jpg'
+green_image_path = '/home/digi/teacher_day/images/surgeon.jpg'
+output_video_path = '/home/digi/teacher_day/modified_video.mp4'
+final_video_path = '/home/digi/teacher_day/final_video_with_audio.mp4'
+font_path = '/home/digi/teacher_day/Fonts/georgia-2-cufonfonts/georgiai.ttf'  # Path to your external font file
+
+# Text properties
+text_properties = [
+    {
+        'text': "Dr. Manish Singh",
+        'font_size': 80,
+        'font_color': (0, 0, 0),  # Black color
+        'position': (920, 465),
+        'frames': list(range(325, 484))
+    },
+    {
+        'text': "Dr. Manish Singh",
+        'font_size': 80,
+        'font_color': (0, 0, 0),  # Black color
+        'position': (270, 440),
+        'frames': list(range(1936, 2134))
+    },
+    {
+        'text': "Dr. Jimmy Parker",
+        'font_size': 50,
+        'font_color': (0, 0, 0),  # Black color
+        'position': (400, 655),
+        'frames': list(range(2550, 2710))
+    }
+]
+
+# Clear and recreate output folder
+if os.path.exists(output_folder):
+    shutil.rmtree(output_folder)
+os.makedirs(output_folder, exist_ok=True)
+
+print("Extracting frames from video...")
+# Extract frames from video
+cap = cv2.VideoCapture(video_path)
+frame_rate = cap.get(cv2.CAP_PROP_FPS)
+frame_count = 0
+
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret:
+        break
+    frame_path = os.path.join(output_folder, f'frame_{frame_count:04d}.png')
+    cv2.imwrite(frame_path, frame)
+    frame_count += 1
+
+cap.release()
+print(f"Extraction completed and stored in frames folder. Extracted {frame_count} frames at {frame_rate} FPS.")
+
+# Define functions for detecting and replacing colored frames
+def detect_colored_frame(frame, lower_color, upper_color):
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, lower_color, upper_color)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if contours:
+        largest_contour = max(contours, key=cv2.contourArea)
+        return largest_contour, mask
+    return None, mask
+
+def create_circular_mask(image, contour, expansion=25):
+    mask = np.zeros(image.shape[:2], dtype=np.uint8)
+    cv2.drawContours(mask, [contour], -1, (255), thickness=cv2.FILLED)
+    if expansion > 0:
+        mask = cv2.dilate(mask, np.ones((expansion, expansion), np.uint8), iterations=1)
+    mask = cv2.GaussianBlur(mask, (15, 15), 0)
+    return mask
+
+def add_white_border(image, border_size):
+    bordered_image = cv2.copyMakeBorder(
+        image, 
+        border_size, border_size, border_size, border_size, 
+        cv2.BORDER_CONSTANT, 
+        value=[255, 255, 255]
+    )
+    return bordered_image
+
+def replace_colored_frame(frame, frame_contour, replacement_image, frame_index):
+    x, y, w, h = cv2.boundingRect(frame_contour)
+    border_size = 0  # You can adjust this value
+    replacement_image_with_border = add_white_border(replacement_image, border_size)
+    replacement_image_resized = cv2.resize(replacement_image_with_border, (w, h))
+    mask = create_circular_mask(frame, frame_contour)
+    mask_inv = cv2.bitwise_not(mask)
+    roi = frame[y:y+h, x:x+w]
+    frame_bg = cv2.bitwise_and(roi, roi, mask=mask_inv[y:y+h, x:x+w])
+    replacement_fg = cv2.bitwise_and(replacement_image_resized, replacement_image_resized, mask=mask[y:y+h, x:x+w])
+    dst = cv2.add(frame_bg, replacement_fg)
+    frame[y:y+h, x:x+w] = dst
+    return frame
+
+# Load replacement images
+yellow_replacement_image = cv2.imread(yellow_image_path)
+green_replacement_image = cv2.imread(green_image_path)
+
+if yellow_replacement_image is None or green_replacement_image is None:
+    print("One or both replacement images not found.")
+    exit()
+
+# Define color ranges in HSV
+lower_yellow = np.array([25, 150, 150])
+upper_yellow = np.array([35, 255, 255])
+lower_green = np.array([45, 100, 50])
+upper_green = np.array([75, 255, 255])
+
+print("Processing frames...")
+# Process each frame
+for frame_index in range(frame_count):
+    frame_path = os.path.join(output_folder, f'frame_{frame_index:04d}.png')
+    frame = cv2.imread(frame_path)
+    if frame is not None:
+        # Detect yellow contours
+        yellow_contour, yellow_mask = detect_colored_frame(frame, lower_yellow, upper_yellow)
+        # Detect green contours
+        green_contour, green_mask = detect_colored_frame(frame, lower_green, upper_green)
+        # Replace detected contours with respective images
+        if yellow_contour is not None:
+            frame = replace_colored_frame(frame, yellow_contour, yellow_replacement_image, frame_index)
+        if green_contour is not None:
+            frame = replace_colored_frame(frame, green_contour, green_replacement_image, frame_index)
+        # Add text to frames
+        for text_prop in text_properties:
+            if frame_index in text_prop['frames']:
+                font = ImageFont.truetype(font_path, text_prop['font_size'])
+                frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                draw = ImageDraw.Draw(frame_pil)
+                draw.text(text_prop['position'], text_prop['text'], font=font, fill=text_prop['font_color'])
+                frame = cv2.cvtColor(np.array(frame_pil), cv2.COLOR_RGB2BGR)
+        cv2.imwrite(frame_path, frame)
+    else:
+        print(f"Frame {frame_path} not found.")
+
+print("Recompiling video from frames...")
+# Recompile video from frames
+first_frame_path = os.path.join(output_folder, 'frame_0000.png')
+first_frame = cv2.imread(first_frame_path)
+if first_frame is None:
+    print("First frame not found.")
+    exit()
+
+frame_height, frame_width, _ = first_frame.shape
+fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+out = cv2.VideoWriter(output_video_path, fourcc, frame_rate, (frame_width, frame_height))
+
+for frame_index in range(frame_count):
+    frame_path = os.path.join(output_folder, f'frame_{frame_index:04d}.png')
+    frame = cv2.imread(frame_path)
+    if frame is not None:
+        out.write(frame)
+    else:
+        print(f"Frame {frame_path} not found.")
+
+out.release()
+print(f"Modified video saved to {output_video_path}")
+
+print("Extracting audio from original video...")
+# Extract audio from original video
+video_clip = mp.VideoFileClip(video_path)
+audio_clip = video_clip.audio
+audio_path = "/home/digi/teacher_day/audio_extracted.mp3"
+audio_clip.write_audiofile(audio_path)
+
+print("Combining modified video with extracted audio...")
+# Combine modified video with extracted audio
+modified_video_clip = mp.VideoFileClip(output_video_path)
+modified_video_with_audio = modified_video_clip.set_audio(mp.AudioFileClip(audio_path))
+modified_video_with_audio.write_videofile(final_video_path, codec='libx264', audio_codec='aac')
+
+print(f"Final video with audio saved to {final_video_path}")
